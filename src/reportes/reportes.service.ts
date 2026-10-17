@@ -1,24 +1,70 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
+import { ConfigService } from '@nestjs/config';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { CreateReporteDto } from './dto/create-reporte.dto';
 import { UpdateReporteDto } from './dto/update-reporte.dto';
 import { Reporte } from './entities/reporte.entity';
 
 @Injectable()
 export class ReportesService {
+  private supabase: SupabaseClient;
+
   constructor(
     @InjectRepository(Reporte)
     private readonly reporteRepository: Repository<Reporte>,
-  ) {}
+    private readonly configService: ConfigService,
+  ) {
+    // Inicializamos el cliente de Supabase para Storage
+    this.supabase = createClient(
+      this.configService.get<string>('NEXT_PUBLIC_SUPABASE_URL')!,
+      this.configService.get<string>('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY')!,
+    );
+  }
 
-  // POST /reportes -> Guarda un nuevo perrito en el mapa
+  // Sube la imagen al bucket 'fotos-perritos' y devuelve la URL publica
+  async subirFoto(file: Express.Multer.File): Promise<{ foto_url: string }> {
+    if (!file) {
+      throw new BadRequestException(
+        'No se proporcionó ningún archivo de imagen',
+      );
+    }
+
+    // Generamos un nombre unico para evitar que fotos con el mismo nombre se sobrescriban
+    const extension = file.originalname.split('.').pop();
+    const nombreArchivo = `${Date.now()}-${Math.round(Math.random() * 1e9)}.${extension}`;
+
+    const { error } = await this.supabase.storage
+      .from('fotos-perritos')
+      .upload(nombreArchivo, file.buffer, {
+        contentType: file.mimetype,
+        upsert: false,
+      });
+
+    if (error) {
+      throw new BadRequestException(
+        `Error al subir imagen a Supabase: ${error.message}`,
+      );
+    }
+
+    // Obtenemos la URL publica de la foto recien subida
+    const { data } = this.supabase.storage
+      .from('fotos-perritos')
+      .getPublicUrl(nombreArchivo);
+
+    return { foto_url: data.publicUrl };
+  }
+
   async create(createReporteDto: CreateReporteDto) {
     const nuevoReporte = this.reporteRepository.create(createReporteDto);
     return await this.reporteRepository.save(nuevoReporte);
   }
 
-  // GET /reportes -> Devuelve todos los reportes (del más nuevo al más viejo)
   async findAll() {
     return await this.reporteRepository.find({
       relations: {
@@ -30,7 +76,6 @@ export class ReportesService {
     });
   }
 
-  // GET /reportes/:id -> Busca un reporte específico por su UUID
   async findOne(id: string) {
     const reporte = await this.reporteRepository.findOne({
       where: { id },
@@ -44,14 +89,12 @@ export class ReportesService {
     return reporte;
   }
 
-  // PATCH /reportes/:id -> Ejemplo: cambiar estado de 'perdido' a 'rescatado'
   async update(id: string, updateReporteDto: UpdateReporteDto) {
     const reporte = await this.findOne(id);
     Object.assign(reporte, updateReporteDto);
     return await this.reporteRepository.save(reporte);
   }
 
-  // DELETE /reportes/:id -> Elimina el reporte
   async remove(id: string) {
     const reporte = await this.findOne(id);
     return await this.reporteRepository.remove(reporte);
