@@ -1,26 +1,51 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { CreatePerfileDto } from './dto/create-perfile.dto';
 import { UpdatePerfileDto } from './dto/update-perfile.dto';
+import { Perfile } from './entities/perfile.entity';
 
 @Injectable()
 export class PerfilesService {
-  create(createPerfileDto: CreatePerfileDto) {
-    return 'This action adds a new perfile';
+  constructor(
+    @InjectRepository(Perfile)
+    private readonly perfilRepository: Repository<Perfile>,
+  ) {}
+
+  async create(createPerfileDto: CreatePerfileDto) {
+    const nuevoPerfil = this.perfilRepository.create(createPerfileDto);
+    return await this.perfilRepository.save(nuevoPerfil);
   }
 
-  findAll() {
-    return `This action returns all perfiles`;
+  async findAll() {
+    return await this.perfilRepository.find({
+      relations: {
+        reportes: true,
+      },
+    });
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} perfile`;
+  async findOne(id: string) {
+    const perfil = await this.perfilRepository.findOne({
+      where: { id },
+      relations: {
+        reportes: true,
+      },
+    });
+    if (!perfil) {
+      throw new NotFoundException(`El perfil con ID ${id} no existe`);
+    }
+    return perfil;
   }
 
-  update(id: number, updatePerfileDto: UpdatePerfileDto) {
-    return `This action updates a #${id} perfile`;
+  async update(id: string, updatePerfileDto: UpdatePerfileDto) {
+    const perfil = await this.findOne(id);
+    Object.assign(perfil, updatePerfileDto);
+    return await this.perfilRepository.save(perfil);
   }
 
-  remove(id: number) {
-    return `This action removes a #${id} perfile`;
+  async remove(id: string) {
+    const perfil = await this.findOne(id);
+    return await this.perfilRepository.remove(perfil);
   }
 }
